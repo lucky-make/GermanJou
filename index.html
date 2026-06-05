@@ -238,6 +238,39 @@
   function buildLookup(vocab){
     const map = new Map();
     const arts = ['der','die','das','ein','eine','einen','einem','einer','des','dem','den'];
+
+    // German inflection suffixes to strip when building stem index
+    const suffixes = ['ungsgesprächs','ungsgespräch','ungsbegleitung','igkeit','schaft','keit',
+      'ungen','enden','ender','endes','endem','enden','esten','ester','estes','estem',
+      'isten','isten','ierte','ierten','ierte','iert','ieren','iere','iere',
+      'ten','test','tet','tem','ten','ter','tes','nen','ner','nes','nem',
+      'ssen','sst','ßen','ßt','ße','ßen','end','est','ern','ere','eres','erem',
+      'st','en','em','es','er','et','te','gt','ht','lt','nt','rt','ft',
+      'ge','be','ver','zer','ent','emp','hin','her','weg','vor','mit','auf',
+      'e','s','n','t'];
+
+    function stems(word){
+      const w = word.toLowerCase().replace(/[^a-zäöüß]/g,'');
+      const result = new Set([w]);
+      for(const sfx of suffixes){
+        if(w.endsWith(sfx) && w.length - sfx.length >= 3){
+          result.add(w.slice(0, w.length - sfx.length));
+        }
+      }
+      return result;
+    }
+
+    // Build stem index from vocab entries
+    const stemIndex = new Map(); // stem -> entry (first registered wins)
+    for(const v of vocab){
+      const parts = v.german.split(/\s+/);
+      // Use the main word (last part, or only part)
+      const mainWord = parts[parts.length - 1];
+      for(const s of stems(mainWord)){
+        if(!stemIndex.has(s)) stemIndex.set(s, v);
+      }
+    }
+
     for(const v of vocab){
       const full = v.german.toLowerCase();
       map.set(full, v);
@@ -251,6 +284,11 @@
         }
       }
     }
+
+    // Now try to match any word in prose via its stem
+    // We expose the stemIndex so renderProse can use it as fallback
+    map._stemIndex = stemIndex;
+    map._stems = stems;
     return map;
   }
 
@@ -340,7 +378,14 @@
       let last=0, m;
       while((m=wordRe.exec(para))!==null){
         if(m.index>last) p.appendChild(document.createTextNode(para.slice(last,m.index)));
-        const raw=m[1], entry=lookup.get(raw.toLowerCase());
+        const raw=m[1];
+        const lower=raw.toLowerCase();
+        let entry=lookup.get(lower);
+        if(!entry && lookup._stemIndex && lookup._stems){
+          for(const s of lookup._stems(lower)){
+            if(lookup._stemIndex.has(s)){ entry=lookup._stemIndex.get(s); break; }
+          }
+        }
         if(entry) p.appendChild(makeGermanWord(raw, entry));
         else p.appendChild(document.createTextNode(raw));
         last=m.index+raw.length;
